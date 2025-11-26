@@ -28,7 +28,7 @@ BRANCH_NAME = "main"
 KEY_PAIR_NAME = os.getenv("KEY_PAIR_NAME") 
 AMI_ID = os.getenv("AMI_ID", "ami-00ac45f3035ff009e") 
 SECURITY_GROUP_ID = os.getenv("SECURITY_GROUP_ID")
-INSTANCE_TYPE = os.getenv("INSTANCE_TYPE", "t3.micro")
+INSTANCE_TYPE = os.getenv("INSTANCE_TYPE", "t3.small")
 
 # Connection (Direct Env Vars)
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
