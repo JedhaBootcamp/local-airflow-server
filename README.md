@@ -39,6 +39,8 @@ This is a **cost-effective, automated, and reliable** way to run expensive ML tr
 
 - **Redis** - Message broker for Celery. When using CeleryExecutor (as we do), Redis queues tasks for distributed execution across multiple workers.
 
+- **Ngrok** - Secure tunnel service (optional). Ngrok creates a public HTTPS URL that tunnels to your local Airflow web server. This is useful for accessing your Airflow UI from anywhere on the internet, or for receiving webhooks from external services. The ngrok web interface (for inspecting requests) is available at http://localhost:4040.
+
 ---
 
 ## Project Architecture
@@ -291,20 +293,91 @@ git clone <repository-url>
 cd Airflow-sample-server
 ```
 
+### Step 1a: Create AWS SSH Key Pair
+
+You need an SSH key pair to securely connect to your EC2 instances. Here's how to create one in AWS:
+
+**Option 1: Using AWS Console (Recommended for beginners)**
+
+1. Log in to the [AWS Console](https://console.aws.amazon.com/)
+2. Navigate to **EC2** → **Key Pairs** (under "Network & Security" in the left sidebar)
+3. Click **"Create key pair"**
+4. Configure:
+   - **Name:** Choose a descriptive name (e.g., `airflow-training-key`)
+   - **Key pair type:** Select **RSA**
+   - **Private key file format:** Select **.pem** (for Linux/Mac) or **.ppk** (for Windows with PuTTY)
+5. Click **"Create key pair"**
+6. **⚠️ Important:** The private key file will automatically download. Save it securely - you'll need it for the `SSH_PRIVATE_KEY_CONTENT` in your `.env` file!
+7. Note the **Key pair name** - you'll use this for `KEY_PAIR_NAME` in your `.env` file
+
+**Option 2: Using AWS CLI**
+
+```bash
+# Create the key pair and save the private key
+aws ec2 create-key-pair \
+    --key-name airflow-training-key \
+    --query 'KeyMaterial' \
+    --output text > airflow-training-key.pem
+
+# Set proper permissions (Linux/Mac only)
+chmod 400 airflow-training-key.pem
+```
+
+**📝 Note:** The key pair name you choose will be used as the `KEY_PAIR_NAME` value in your `.env` file. The private key content (from the downloaded `.pem` file) will be used for `SSH_PRIVATE_KEY_CONTENT`.
+
+### Step 1b: Get GitHub Personal Access Token
+
+You need a GitHub Personal Access Token (PAT) to authenticate with GitHub's API and check CI status. Here's how to create one:
+
+1. Log in to [GitHub](https://github.com/)
+2. Click your profile picture (top right) → **Settings**
+3. Scroll down to **Developer settings** (left sidebar, at the bottom)
+4. Click **Personal access tokens** → **Tokens (classic)**
+5. Click **"Generate new token"** → **"Generate new token (classic)"**
+6. Configure the token:
+   - **Note:** Give it a descriptive name (e.g., "Airflow CI Checker")
+   - **Expiration:** Choose an expiration date (or "No expiration" for development)
+   - **Scopes:** Check the following boxes:
+     - ✅ `repo` (Full control of private repositories)
+     - ✅ `actions:read` (Read GitHub Actions data)
+7. Click **"Generate token"** at the bottom
+8. **⚠️ Important:** Copy the token immediately! GitHub will only show it once. It looks like: `ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
+9. Save this token - you'll use it for `GITHUB_PAT` in your `.env` file
+
+**🔒 Security Tip:** Never commit your token to Git. Always use environment variables or `.env` files (which are in `.gitignore`).
+
+### Step 1c: Get Ngrok Auth Token (Optional)
+
+Ngrok allows you to expose your local Airflow UI to the internet securely. This is useful if you want to access Airflow from your phone, share it with teammates, or receive webhooks. If you don't need remote access, you can skip this step.
+
+1. Go to [ngrok.com](https://ngrok.com/) and sign up for a free account (or log in if you already have one)
+2. After logging in, navigate to [Your Authtoken](https://dashboard.ngrok.com/get-started/your-authtoken)
+3. You'll see your authtoken displayed (it looks like: `2abc123def456ghi789jkl012mno345pqr678stu901vwx234yz`)
+4. **Copy the authtoken** - you'll use it for `NGROK_AUTHTOKEN` in your `.env` file
+
+**💡 What Ngrok does:**
+- Creates a secure HTTPS tunnel from the internet to your local Airflow server
+- Provides a public URL (e.g., `https://abc123.ngrok.io`) that forwards to `localhost:8080`
+- Includes a web dashboard at `http://localhost:4040` to inspect requests and see the public URL
+
+**📝 Note:** The free tier of Ngrok is perfect for development and testing. For production use, consider upgrading to a paid plan for custom domains and more features.
+
 ### Step 2: Create Environment File
 
 Create a `.env` file in the project root with the following variables:
 
+**💡 Tip:** You should have completed Step 1a (SSH key pair) and Step 1b (GitHub token) before filling in the values below.
+
 ```bash
 # GitHub Configuration
 GITHUB_REPO=your-username/your-repo-name
-GITHUB_PAT=your_github_personal_access_token
+GITHUB_PAT=your_github_personal_access_token  # From Step 1b
 
 # AWS Configuration
 AWS_ACCESS_KEY_ID=your_aws_access_key
 AWS_SECRET_ACCESS_KEY=your_aws_secret_key
 AWS_DEFAULT_REGION=eu-west-3  # or your preferred region
-KEY_PAIR_NAME=your-ec2-key-pair-name
+KEY_PAIR_NAME=your-ec2-key-pair-name  # From Step 1a (e.g., "airflow-training-key")
 AMI_ID=ami-00ac45f3035ff009e  # Ubuntu AMI (or your custom AMI)
 SECURITY_GROUP_ID=sg-xxxxxxxxx  # Security group allowing SSH (port 22)
 INSTANCE_TYPE=t3.small
@@ -314,16 +387,23 @@ MLFLOW_TRACKING_URI=http://your-mlflow-server:5000
 MLFLOW_EXPERIMENT_NAME=california_housing
 
 # SSH Private Key (for connecting to EC2)
-# Paste your private key content here (the one matching KEY_PAIR_NAME)
+# From Step 1a: Open the downloaded .pem file and paste its entire contents here
+# Make sure to include the BEGIN and END lines!
 SSH_PRIVATE_KEY_CONTENT="-----BEGIN RSA PRIVATE KEY-----
 ...
 -----END RSA PRIVATE KEY-----"
 
 # Airflow Configuration (optional)
 AIRFLOW_UID=$(id -u)  # On Linux/Mac, this sets the user ID
+
+# Ngrok Configuration (optional - for exposing Airflow UI publicly)
+# From Step 1c: Paste your ngrok authtoken here (skip if you don't need remote access)
+NGROK_AUTHTOKEN=your_ngrok_authtoken_here
 ```
 
 **⚠️ Security Note:** Never commit the `.env` file! It's already in `.gitignore`.
+
+**📡 About Ngrok:** If you completed Step 1c and added the `NGROK_AUTHTOKEN` to your `.env` file, Ngrok will automatically start when you run `docker-compose up`. You can view the ngrok dashboard at http://localhost:4040 to see the public URL and inspect requests. If you didn't set up Ngrok, the service simply won't start (which is fine for local-only access).
 
 ### Step 3: Set Airflow User ID (Linux/Mac)
 
@@ -355,13 +435,21 @@ This starts all services in the background:
 - PostgreSQL database
 - Redis broker
 - Worker processes
+- Ngrok (if `NGROK_AUTHTOKEN` is set in `.env`) - exposes Airflow UI publicly
 
 ### Step 6: Access the Airflow UI
 
+**Local Access:**
 1. Open your browser to **http://localhost:8080**
 2. Login with:
    - **Username:** `airflow`
    - **Password:** `airflow`
+
+**Remote Access (if Ngrok is configured):**
+1. Visit **http://localhost:4040** to see the Ngrok web interface
+2. Copy the public HTTPS URL (e.g., `https://abc123.ngrok.io`)
+3. Use that URL to access Airflow from anywhere on the internet
+4. The same login credentials apply (`airflow` / `airflow`)
 
 ### Step 7: Enable and Run the DAG
 
